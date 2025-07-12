@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Music Player with EQ Color</title>
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background-color: black;
+      color: white;
+      transition: background-color 0.2s linear;
+    }
+    input[type="file"] {
+      margin-bottom: 20px;
+    }
+    audio {
+      width: 300px;
+    }
+    .slider-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 20px;
+    }
+    .slider {
+      display: flex;
+      align-items: center;
+      margin: 5px;
+    }
+    .slider label {
+      margin-right: 10px;
+      width: 50px;
+    }
+  </style>
+</head>
+<body>
+  <input type="file" accept="audio/*" id="fileInput">
+  <audio id="audioPlayer" controls></audio>
+
+  <div class="slider-container">
+    <div class="slider">
+      <label for="lowGain">Low</label>
+      <input type="range" id="lowGain" min="-40" max="40" value="0">
+    </div>
+    <div class="slider">
+      <label for="midGain">Mid</label>
+      <input type="range" id="midGain" min="-40" max="40" value="0">
+    </div>
+    <div class="slider">
+      <label for="highGain">High</label>
+      <input type="range" id="highGain" min="-40" max="40" value="0">
+    </div>
+  </div>
+
+  <script>
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const fileInput = document.getElementById('fileInput');
+    const audioPlayer = document.getElementById('audioPlayer');
+
+    const sourceNode = audioCtx.createMediaElementSource(audioPlayer);
+
+    // EQ bands
+    const low = audioCtx.createBiquadFilter();
+    low.type = 'lowshelf';
+    low.frequency.value = 320;
+
+    const mid = audioCtx.createBiquadFilter();
+    mid.type = 'peaking';
+    mid.frequency.value = 1000;
+    mid.Q.value = 1;
+
+    const high = audioCtx.createBiquadFilter();
+    high.type = 'highshelf';
+    high.frequency.value = 3000;
+
+    // Analyzer
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    // Connect graph
+    sourceNode.connect(low);
+    low.connect(mid);
+    mid.connect(high);
+    high.connect(analyser);
+    analyser.connect(audioCtx.destination);
+
+    // Buffers for adaptive scaling
+    const historyLength = 60; // 60 frames ~ 4s at 15fps
+    const lowHistory = [];
+    const midHistory = [];
+    const highHistory = [];
+
+    function getBandEnergy(freqLow, freqHigh) {
+      let start = Math.floor(freqLow / (audioCtx.sampleRate / 2) * bufferLength);
+      let end = Math.ceil(freqHigh / (audioCtx.sampleRate / 2) * bufferLength);
+      let sum = 0;
+      for (let i = start; i < end; i++) {
+        sum += dataArray[i];
+      }
+      return sum / (end - start);
+    }
+
+    function normalizeDynamic(value, history) {
+      history.push(value);
+      if (history.length > historyLength) history.shift();
+      const min = Math.min(...history);
+      const max = Math.max(...history);
+      return max > min ? (value - min) / (max - min) : 0;
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      analyser.getByteFrequencyData(dataArray);
+
+      const rawLow = getBandEnergy(20, 320);
+      const rawMid = getBandEnergy(320, 2000);
+      const rawHigh = getBandEnergy(2000, 8000);
+
+      const normLow = normalizeDynamic(rawLow, lowHistory);
+      const normMid = normalizeDynamic(rawMid, midHistory);
+      const normHigh = normalizeDynamic(rawHigh, highHistory);
+
+      const r = Math.round(normLow * 255);
+      const g = Math.round(normMid * 255);
+      const b = Math.round(normHigh * 255);
+
+      const rgb = `rgb(${r}, ${g}, ${b})`;
+      document.body.style.backgroundColor = rgb;
+    }
+
+    fileInput.addEventListener('change', function () {
+      const files = this.files;
+      if (files.length > 0) {
+        const url = URL.createObjectURL(files[0]);
+        audioPlayer.src = url;
+        audioPlayer.play();
+        audioCtx.resume();
+        animate();
+      }
+    });
+
+    // Slider controls
+    document.getElementById('lowGain').addEventListener('input', e => {
+      low.gain.value = parseFloat(e.target.value);
+    });
+    document.getElementById('midGain').addEventListener('input', e => {
+      mid.gain.value = parseFloat(e.target.value);
+    });
+    document.getElementById('highGain').addEventListener('input', e => {
+      high.gain.value = parseFloat(e.target.value);
+    });
+  </script>
+</body>
+</html>
