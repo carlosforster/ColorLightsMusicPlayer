@@ -72,7 +72,7 @@
     const mid = audioCtx.createBiquadFilter();
     mid.type = 'peaking';
     mid.frequency.value = 1000;
-    mid.Q.value = 1;
+    mid.Q.value = 2;
 
     const high = audioCtx.createBiquadFilter();
     high.type = 'highshelf';
@@ -91,11 +91,9 @@
     high.connect(analyser);
     analyser.connect(audioCtx.destination);
 
-    // Buffers for adaptive scaling
+    // Unified history buffer for adaptive scaling
     const historyLength = 60; // 60 frames ~ 4s at 15fps
-    const lowHistory = [];
-    const midHistory = [];
-    const highHistory = [];
+    const unifiedHistory = [];
 
     function getBandEnergy(freqLow, freqHigh) {
       let start = Math.floor(freqLow / (audioCtx.sampleRate / 2) * bufferLength);
@@ -123,9 +121,13 @@
       const rawMid = getBandEnergy(320, 2000);
       const rawHigh = getBandEnergy(2000, 8000);
 
-      const normLow = normalizeDynamic(rawLow, lowHistory);
-      const normMid = normalizeDynamic(rawMid, midHistory);
-      const normHigh = normalizeDynamic(rawHigh, highHistory);
+      // Push all raw values into unified history for shared min/max
+      unifiedHistory.push(rawLow, rawMid, rawHigh);
+      if (unifiedHistory.length > historyLength * 3) unifiedHistory.splice(0, unifiedHistory.length - historyLength * 3);
+
+      const normLow = normalizeDynamic(rawLow, unifiedHistory);
+      const normMid = normalizeDynamic(rawMid, unifiedHistory);
+      const normHigh = normalizeDynamic(rawHigh, unifiedHistory);
 
       const r = Math.round(normLow * 255);
       const g = Math.round(normMid * 255);
